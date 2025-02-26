@@ -55,11 +55,11 @@ def load_model_and_tokenizer():
             torch.cuda.empty_cache()
             print(f"Initial CUDA memory allocated: {torch.cuda.memory_allocated()/1e9:.2f} GB")
         
-        # Initialize model with language model path
+        # First initialize model with language model configuration
         print(f"Initializing model with config from: {lang_model_path}")
         global_model = MultiLLaMAForCausalLM(lang_model_path=lang_model_path)
         
-        # Load the RadFM checkpoint
+        # Then load the RadFM checkpoint
         if os.path.exists(checkpoint_path):
             print("Loading RadFM checkpoint from:", checkpoint_path)
             ckpt = torch.load(checkpoint_path, map_location='cpu')
