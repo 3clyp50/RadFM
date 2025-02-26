@@ -4,7 +4,16 @@ from typing import Optional, Dict, Sequence
 from typing import List, Optional, Tuple, Union
 import transformers
 from dataclasses import dataclass, field
-from Model.RadFM.multimodality_model import MultiLLaMAForCausalLM
+import sys
+from pathlib import Path
+import os
+
+# Add the parent directory to sys.path
+current_dir = Path(__file__).parent.resolve()
+root_dir = current_dir.parent
+sys.path.append(str(root_dir))
+
+from src.Model.RadFM.multimodality_model import MultiLLaMAForCausalLM
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, LlamaTokenizer
 from torchvision import transforms
