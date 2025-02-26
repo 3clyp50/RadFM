@@ -10,26 +10,43 @@ from torch.utils.checkpoint import checkpoint
 from torch.autograd import Variable
 import numpy as np
 import gc
+import os
 
 class MultiLLaMAForCausalLM(nn.Module):
     def __init__(self, lang_model_path):  
         super(MultiLLaMAForCausalLM, self).__init__()  
-        try:
-            # Use memory-efficient loading with low_cpu_mem_usage=True
-            print("Attempting to load LlamaForCausalLM with memory optimization...")
-            self.lang_model = LlamaForCausalLM.from_pretrained(
-                lang_model_path,
-                low_cpu_mem_usage=True,  # Enable memory optimization
-                torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,  # Use half precision if GPU available
-            )
-            print("LlamaForCausalLM loaded successfully with memory optimization")
-        except Exception as e:
-            print(f"Error loading pretrained model: {e}")
-            print("Falling back to config-only initialization")
-            # If loading fails, initialize from config only
-            config = AutoConfig.from_pretrained(lang_model_path)
-            self.lang_model = LlamaForCausalLM(config)
-            print("Model initialized from config only")
+        
+        # Check if we're trying to load from Language_files
+        if os.path.basename(lang_model_path) == "Language_files":
+            print("Detected Language_files path - using config-only initialization")
+            # Always use config-only initialization for Language_files
+            # This avoids trying to load weights from Language_files
+            try:
+                print("Loading config from:", lang_model_path)
+                config = AutoConfig.from_pretrained(lang_model_path)
+                self.lang_model = LlamaForCausalLM(config)
+                print("Model initialized from config only - weights will be loaded separately")
+            except Exception as e:
+                print(f"Error loading config: {e}")
+                raise ValueError(f"Failed to load config from {lang_model_path}. Make sure config.json exists.")
+        else:
+            # For other paths, try normal loading
+            try:
+                # Use memory-efficient loading with low_cpu_mem_usage=True
+                print("Attempting to load LlamaForCausalLM with memory optimization...")
+                self.lang_model = LlamaForCausalLM.from_pretrained(
+                    lang_model_path,
+                    low_cpu_mem_usage=True,  # Enable memory optimization
+                    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,  # Use half precision if GPU available
+                )
+                print("LlamaForCausalLM loaded successfully with memory optimization")
+            except Exception as e:
+                print(f"Error loading pretrained model: {e}")
+                print("Falling back to config-only initialization")
+                # If loading fails, initialize from config only
+                config = AutoConfig.from_pretrained(lang_model_path)
+                self.lang_model = LlamaForCausalLM(config)
+                print("Model initialized from config only")
         
         # Enable memory optimization techniques
         self.lang_model.gradient_checkpointing_enable()

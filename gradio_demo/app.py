@@ -40,11 +40,53 @@ quick_demo_dir = os.path.join(root_dir, "Quick_demo")
 checkpoint_path = os.path.join(quick_demo_dir, "pytorch_model.bin")  # Checkpoint in Quick_demo
 lang_model_path = os.path.join(quick_demo_dir, "Language_files")  # Language files in Quick_demo
 
+# Add a function to check and explain file locations
+def check_model_files():
+    """Check if model files exist in the expected locations and print helpful messages."""
+    print("\n=== Checking Model Files ===")
+    
+    # Check Language_files directory
+    if os.path.exists(lang_model_path):
+        print(f"✓ Language_files directory exists at: {lang_model_path}")
+        config_file = os.path.join(lang_model_path, "config.json")
+        if os.path.exists(config_file):
+            print(f"✓ Found config.json in Language_files")
+        else:
+            print(f"✗ Missing config.json in Language_files - this is required!")
+            
+        tokenizer_file = os.path.join(lang_model_path, "tokenizer.json")
+        if os.path.exists(tokenizer_file):
+            print(f"✓ Found tokenizer.json in Language_files")
+        else:
+            print(f"✗ Missing tokenizer.json in Language_files - this is required!")
+            
+        model_file_in_lang = os.path.join(lang_model_path, "pytorch_model.bin")
+        if os.path.exists(model_file_in_lang):
+            print(f"! Found pytorch_model.bin in Language_files - this is NOT needed here")
+            print(f"  You can safely remove this file to save disk space")
+    else:
+        print(f"✗ Language_files directory not found at: {lang_model_path}")
+        print(f"  Please create this directory and add the required config files")
+    
+    # Check checkpoint file
+    if os.path.exists(checkpoint_path):
+        print(f"✓ Found RadFM checkpoint at: {checkpoint_path}")
+        checkpoint_size = os.path.getsize(checkpoint_path) / (1024 * 1024 * 1024)  # Size in GB
+        print(f"  Checkpoint size: {checkpoint_size:.2f} GB")
+    else:
+        print(f"✗ RadFM checkpoint not found at: {checkpoint_path}")
+        print(f"  Please download the checkpoint from https://huggingface.co/chaoyi-wu/RadFM")
+    
+    print("=== File Check Complete ===\n")
+
 def load_model_and_tokenizer():
     """Load the RadFM model and tokenizer."""
     global global_model, global_tokenizer, global_image_padding_tokens, device
     
     try:
+        # Check model files first
+        check_model_files()
+        
         # Force garbage collection before loading model
         gc.collect()
         torch.cuda.empty_cache() if torch.cuda.is_available() else None
@@ -64,7 +106,9 @@ def load_model_and_tokenizer():
         print(f"Initializing model with config from: {lang_model_path}")
         
         # Memory-efficient loading approach
-        # 1. Create model with config only first
+        # 1. Create model with config only first - this will NOT try to load weights from Language_files
+        # but will only use the config.json file
+        print("Creating model from config only - NOT loading weights from Language_files")
         global_model = MultiLLaMAForCausalLM(lang_model_path=lang_model_path)
         
         # 2. Load checkpoint directly to the device to avoid duplicating in RAM
