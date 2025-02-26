@@ -62,39 +62,48 @@ def load_model_and_tokenizer():
         # Then load the RadFM checkpoint
         if os.path.exists(checkpoint_path):
             print("Loading RadFM checkpoint from:", checkpoint_path)
-            ckpt = torch.load(checkpoint_path, map_location='cpu')
-            global_model.load_state_dict(ckpt)
-            del ckpt  # Free CPU memory from checkpoint
-            
-            if torch.cuda.is_available():
-                try:
-                    print("Moving model to GPU...")
-                    global_model = global_model.to('cuda')
-                    device = torch.device('cuda')
-                    torch.cuda.empty_cache()
-                    print(f"CUDA memory after model loading: {torch.cuda.memory_allocated()/1e9:.2f} GB")
-                except RuntimeError as e:
-                    print(f"CUDA error: {e}")
-                    print("Falling back to CPU due to CUDA memory constraints")
-                    device = torch.device('cpu')
-            
-            global_model.eval()
-            print(f"Model loaded successfully on {device}!")
-            
-            # Print memory usage
-            if torch.cuda.is_available():
-                print(f"Final CUDA memory allocated: {torch.cuda.memory_allocated()/1e9:.2f} GB")
-                print(f"Final CUDA memory cached: {torch.cuda.memory_reserved()/1e9:.2f} GB")
-            
-            import psutil
-            process = psutil.Process()
-            print(f"CPU RAM usage: {process.memory_info().rss/1e9:.2f} GB")
-            
+            try:
+                ckpt = torch.load(checkpoint_path, map_location='cpu')
+                global_model.load_state_dict(ckpt, strict=False)  # Use strict=False to handle partial loading
+                del ckpt  # Free CPU memory from checkpoint
+                
+                if torch.cuda.is_available():
+                    try:
+                        print("Moving model to GPU...")
+                        global_model = global_model.to('cuda')
+                        device = torch.device('cuda')
+                        torch.cuda.empty_cache()
+                        print(f"CUDA memory after model loading: {torch.cuda.memory_allocated()/1e9:.2f} GB")
+                    except RuntimeError as e:
+                        print(f"CUDA error: {e}")
+                        print("Falling back to CPU due to CUDA memory constraints")
+                        device = torch.device('cpu')
+                
+                global_model.eval()
+                print(f"Model loaded successfully on {device}!")
+                
+                # Print memory usage
+                if torch.cuda.is_available():
+                    print(f"Final CUDA memory allocated: {torch.cuda.memory_allocated()/1e9:.2f} GB")
+                    print(f"Final CUDA memory cached: {torch.cuda.memory_reserved()/1e9:.2f} GB")
+                
+                import psutil
+                process = psutil.Process()
+                print(f"CPU RAM usage: {process.memory_info().rss/1e9:.2f} GB")
+                
+            except Exception as e:
+                print(f"Error loading checkpoint: {e}")
+                print("Please ensure the checkpoint file is not corrupted")
+                return "Error loading checkpoint!"
         else:
-            print(f"Warning: Model checkpoint not found at {checkpoint_path}")
-            print("Please download the model checkpoint from https://huggingface.co/chaoyi-wu/RadFM")
-            print("and place it in the Quick_demo directory as pytorch_model.bin")
-            return "Model checkpoint not found!"
+            error_msg = f"\nERROR: Model checkpoint not found at {checkpoint_path}\n"
+            error_msg += "\nPlease follow these steps to set up the model:\n"
+            error_msg += "1. Download the RadFM checkpoint from https://huggingface.co/chaoyi-wu/RadFM\n"
+            error_msg += f"2. Place the pytorch_model.bin file in: {os.path.dirname(checkpoint_path)}\n"
+            error_msg += "3. Ensure the file is named exactly 'pytorch_model.bin'\n"
+            error_msg += "4. Restart the application\n"
+            print(error_msg)
+            return error_msg
         
     except Exception as e:
         print(f"Error during model loading: {e}")
