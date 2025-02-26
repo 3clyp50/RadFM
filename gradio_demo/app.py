@@ -186,9 +186,6 @@ def run_inference(image_array, prompt):
     """Run RadFM model inference on the given image and prompt."""
     global global_model, global_tokenizer, global_image_padding_tokens
     
-    if global_model is None or global_tokenizer is None:
-        return "Model not loaded. Please load the model first."
-    
     # Preprocess the image
     image_tensor = preprocess_for_model(image_array)
     
@@ -385,6 +382,11 @@ def process_chat(message, history, volume_data, view_type, axial_pos, coronal_po
 
 # Define the Gradio application
 def create_demo():
+    # Load model and tokenizer at startup
+    print("Initializing RadFM model and tokenizer...")
+    load_model_and_tokenizer()
+    print("Initialization complete!")
+    
     with gr.Blocks(title="RadFM Medical Imaging Demo") as demo:
         gr.Markdown(
             """
@@ -396,7 +398,7 @@ def create_demo():
             3. Navigate through volumes with sliders
             4. Chat with the RadFM model about your medical images
             
-            **Note:** You need to load the model first. The model checkpoint should be placed in the Quick_demo folder.
+            The model is loaded and ready to use!
             """
         )
         
@@ -405,7 +407,6 @@ def create_demo():
         
         with gr.Row():
             with gr.Column(scale=1):
-                load_model_btn = gr.Button("Load Model")
                 file_input = gr.File(label="Upload DICOM or NIFTI file")
                 view_mode = gr.Radio(
                     ["2D/Single Slice", "3D/Multiplanar", "3D/Volume"],
@@ -434,8 +435,6 @@ def create_demo():
                     clear_btn = gr.Button("Clear Chat")
         
         # Event handlers
-        load_model_btn.click(fn=load_model_and_tokenizer, outputs=metadata_text)
-        
         file_input.change(
             fn=process_medical_image,
             inputs=[file_input, view_mode],
