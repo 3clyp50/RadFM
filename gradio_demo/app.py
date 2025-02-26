@@ -34,8 +34,9 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 global_model = None
 global_tokenizer = None
 global_image_padding_tokens = None
-checkpoint_path = os.path.join(root_dir, "Quick_demo", "pytorch_model.bin")
-lang_model_path = os.path.join(root_dir, "Quick_demo", "Language_files")
+# Separate paths for language model files and checkpoint
+checkpoint_path = os.path.join(root_dir, "pytorch_model.bin")  # Main checkpoint in root
+lang_model_path = os.path.join(root_dir, "Quick_demo", "Language_files")  # Language files in Quick_demo
 
 def load_model_and_tokenizer():
     """Load the RadFM model and tokenizer."""
@@ -52,11 +53,11 @@ def load_model_and_tokenizer():
             torch.cuda.empty_cache()
             print(f"Initial CUDA memory allocated: {torch.cuda.memory_allocated()/1e9:.2f} GB")
         
-        # Initialize model
+        # Initialize model with language model path
         global_model = MultiLLaMAForCausalLM(lang_model_path=lang_model_path)
         
         if os.path.exists(checkpoint_path):
-            print("Loading checkpoint to CPU first...")
+            print("Loading checkpoint from:", checkpoint_path)
             ckpt = torch.load(checkpoint_path, map_location='cpu')
             global_model.load_state_dict(ckpt)
             del ckpt  # Free CPU memory from checkpoint
@@ -88,7 +89,7 @@ def load_model_and_tokenizer():
         else:
             print(f"Warning: Model checkpoint not found at {checkpoint_path}")
             print("Please download the model checkpoint from https://huggingface.co/chaoyi-wu/RadFM")
-            print("and place it in the Quick_demo directory.")
+            print("and place it in the root RadFM directory.")
             return "Model checkpoint not found!"
         
     except Exception as e:
