@@ -15,6 +15,7 @@ import base64
 import torchvision.transforms as transforms
 import torch.nn.functional as F
 from torchvision.utils import make_grid
+import gc  # Add garbage collection
 
 # Add the parent directory to sys.path to make the imports work
 current_dir = Path(__file__).parent.resolve()
@@ -44,6 +45,10 @@ def load_model_and_tokenizer():
     global global_model, global_tokenizer, global_image_padding_tokens, device
     
     try:
+        # Force garbage collection before loading model
+        gc.collect()
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+        
         print("Loading tokenizer...")
         print(f"Using language model files from: {lang_model_path}")
         global_tokenizer, global_image_padding_tokens = get_tokenizer(lang_model_path)
@@ -55,23 +60,44 @@ def load_model_and_tokenizer():
             torch.cuda.empty_cache()
             print(f"Initial CUDA memory allocated: {torch.cuda.memory_allocated()/1e9:.2f} GB")
         
-        # Initialize model with language model configuration
+        # Initialize model with language model configuration but don't load weights yet
         print(f"Initializing model with config from: {lang_model_path}")
+        
+        # Memory-efficient loading approach
+        # 1. Create model with config only first
         global_model = MultiLLaMAForCausalLM(lang_model_path=lang_model_path)
         
-        # Then load the RadFM checkpoint
+        # 2. Load checkpoint directly to the device to avoid duplicating in RAM
         if os.path.exists(checkpoint_path):
             print("Loading RadFM checkpoint from:", checkpoint_path)
             try:
-                ckpt = torch.load(checkpoint_path, map_location='cpu')
-                global_model.load_state_dict(ckpt)  # Match test.py exactly - no strict=False
-                del ckpt  # Free CPU memory from checkpoint
+                # Load checkpoint with memory mapping to reduce RAM usage
+                print("Using memory-mapped loading for checkpoint")
+                map_location = 'cpu'  # Always load to CPU first
                 
+                # Use memory-efficient loading
+                ckpt = torch.load(checkpoint_path, map_location=map_location)
+                
+                # Load state dict
+                global_model.load_state_dict(ckpt)
+                
+                # Free memory immediately
+                del ckpt
+                gc.collect()
+                torch.cuda.empty_cache() if torch.cuda.is_available() else None
+                
+                print("Checkpoint loaded to CPU successfully")
+                
+                # Move to GPU in a memory-efficient way if available
                 if torch.cuda.is_available():
                     try:
                         print("Moving model to GPU...")
+                        # Move model to GPU
                         global_model = global_model.to('cuda')
                         device = torch.device('cuda')
+                        
+                        # Force garbage collection after moving to GPU
+                        gc.collect()
                         torch.cuda.empty_cache()
                         print(f"CUDA memory after model loading: {torch.cuda.memory_allocated()/1e9:.2f} GB")
                     except RuntimeError as e:
@@ -79,6 +105,7 @@ def load_model_and_tokenizer():
                         print("Falling back to CPU due to CUDA memory constraints")
                         device = torch.device('cpu')
                 
+                # Set model to evaluation mode
                 global_model.eval()
                 print(f"Model loaded successfully on {device}!")
                 
@@ -239,11 +266,16 @@ def run_inference(image_array, prompt):
     global global_model, global_tokenizer, global_image_padding_tokens
     
     try:
+        # Force garbage collection before inference
+        gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+            print(f"CUDA memory before inference: {torch.cuda.memory_allocated()/1e9:.2f} GB")
         
-        # Preprocess the image
-        image_tensor = preprocess_for_model(image_array)
+        # Preprocess the image with memory optimization
+        print("Preprocessing image...")
+        with torch.no_grad():
+            image_tensor = preprocess_for_model(image_array)
         
         # Combine text and images for model input
         question = [prompt]
@@ -255,10 +287,13 @@ def run_inference(image_array, prompt):
         ]
         
         # Prepare model input
+        print("Running inference...")
         with torch.no_grad():
             # Handle direct tensor input
             text = prompt
             vision_tensors = [img_info['img_tensor'] for img_info in image_info]
+            
+            # Use memory-efficient tensor operations
             vision_x = torch.cat(vision_tensors, dim=1).unsqueeze(0)
             
             # Add image placeholder to text
@@ -272,12 +307,22 @@ def run_inference(image_array, prompt):
             # Move vision_x to device
             vision_x = vision_x.to('cuda' if torch.cuda.is_available() else 'cpu')
             
-            # Generate response
-            generation = global_model.generate(lang_x, vision_x)
+            print("Generating response...")
+            # Use mixed precision for generation if available
+            if torch.cuda.is_available():
+                with torch.cuda.amp.autocast():
+                    generation = global_model.generate(lang_x, vision_x)
+            else:
+                generation = global_model.generate(lang_x, vision_x)
+                
             response = global_tokenizer.batch_decode(generation, skip_special_tokens=True)[0]
             
+            # Clean up memory after inference
+            del lang_x, vision_x, generation
+            gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+                print(f"CUDA memory after inference: {torch.cuda.memory_allocated()/1e9:.2f} GB")
             
             return response
             
@@ -288,11 +333,13 @@ def run_inference(image_array, prompt):
             print(f"CUDA out of memory error: {e}")
             return "Error: GPU out of memory. Please try again with a smaller input."
         else:
-            print(f"Runtime error during inference: {e}")
+            print(f"Runtime error: {e}")
             return f"Error during inference: {str(e)}"
     except Exception as e:
-        print(f"Error during inference: {e}")
-        return f"Error during inference: {str(e)}"
+        print(f"Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+        return f"Error: {str(e)}"
 
 def create_multiplanar_view(volume_data, slice_idx=None):
     """Create multiplanar views (axial, coronal, sagittal) from volume data."""

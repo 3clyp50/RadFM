@@ -9,23 +9,42 @@ import torch
 from torch.utils.checkpoint import checkpoint
 from torch.autograd import Variable
 import numpy as np
+import gc
+
 class MultiLLaMAForCausalLM(nn.Module):
     def __init__(self, lang_model_path):  
         super(MultiLLaMAForCausalLM, self).__init__()  
         try:
+            # Use memory-efficient loading with low_cpu_mem_usage=True
+            print("Attempting to load LlamaForCausalLM with memory optimization...")
             self.lang_model = LlamaForCausalLM.from_pretrained(
                 lang_model_path,
+                low_cpu_mem_usage=True,  # Enable memory optimization
+                torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,  # Use half precision if GPU available
             )
-        except:
+            print("LlamaForCausalLM loaded successfully with memory optimization")
+        except Exception as e:
+            print(f"Error loading pretrained model: {e}")
+            print("Falling back to config-only initialization")
+            # If loading fails, initialize from config only
             config = AutoConfig.from_pretrained(lang_model_path)
             self.lang_model = LlamaForCausalLM(config)
+            print("Model initialized from config only")
+        
+        # Enable memory optimization techniques
         self.lang_model.gradient_checkpointing_enable()
         self.lang_model.enable_input_require_grads()
-        # self.lang_model.requires_grad_(False)
+        
+        # Initialize embedding layer after language model to avoid memory duplication
         self.embedding_layer = MyEmbedding()
         self.embedding_layer.weight = self.lang_model.get_input_embeddings().weight
         self.hidden_dim = 5120
         self.voc_size = 32000
+        
+        # Force garbage collection after initialization
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         
     def forward(self,lang_x, vision_x, attention_mask, labels, loss_reweight,key_words_query):
         if labels.shape == lang_x.shape:
@@ -76,9 +95,23 @@ class MultiLLaMAForCausalLM(nn.Module):
         #    self.embedding_layer.flag = 'Seg'
         #    input_embedding = self.embedding_layer(lang_x, vision_x)
     
-    def generate(self, lang_x,vision_x):
+    def generate(self, lang_x, vision_x):
         self.embedding_layer.flag = 'Text'
         with torch.no_grad():
-            input_embedding,_ = self.embedding_layer(lang_x, vision_x) 
-            generation = self.lang_model.generate(inputs_embeds = input_embedding, max_new_tokens =200,top_k=50)
+            # Clear cache before generation
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                
+            input_embedding, _ = self.embedding_layer(lang_x, vision_x) 
+            generation = self.lang_model.generate(
+                inputs_embeds=input_embedding, 
+                max_new_tokens=200,
+                top_k=50,
+                do_sample=False  # Deterministic generation uses less memory
+            )
+            
+            # Clear cache after generation
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                
         return generation
