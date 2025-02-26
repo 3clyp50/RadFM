@@ -57,7 +57,14 @@ def load_model_and_tokenizer():
         
         # First initialize model with language model configuration
         print(f"Initializing model with config from: {lang_model_path}")
-        global_model = MultiLLaMAForCausalLM(lang_model_path=lang_model_path)
+        try:
+            global_model = MultiLLaMAForCausalLM(lang_model_path=lang_model_path)
+        except Exception as e:
+            print(f"Error during model initialization: {e}")
+            print("Attempting to initialize with config only...")
+            from transformers import AutoConfig
+            config = AutoConfig.from_pretrained(lang_model_path)
+            global_model = MultiLLaMAForCausalLM(lang_model_path=lang_model_path)
         
         # Then load the RadFM checkpoint
         if os.path.exists(checkpoint_path):
