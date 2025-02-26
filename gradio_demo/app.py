@@ -55,23 +55,16 @@ def load_model_and_tokenizer():
             torch.cuda.empty_cache()
             print(f"Initial CUDA memory allocated: {torch.cuda.memory_allocated()/1e9:.2f} GB")
         
-        # First initialize model with language model configuration
+        # Initialize model with language model configuration
         print(f"Initializing model with config from: {lang_model_path}")
-        try:
-            global_model = MultiLLaMAForCausalLM(lang_model_path=lang_model_path)
-        except Exception as e:
-            print(f"Error during model initialization: {e}")
-            print("Attempting to initialize with config only...")
-            from transformers import AutoConfig
-            config = AutoConfig.from_pretrained(lang_model_path)
-            global_model = MultiLLaMAForCausalLM(lang_model_path=lang_model_path)
+        global_model = MultiLLaMAForCausalLM(lang_model_path=lang_model_path)
         
         # Then load the RadFM checkpoint
         if os.path.exists(checkpoint_path):
             print("Loading RadFM checkpoint from:", checkpoint_path)
             try:
                 ckpt = torch.load(checkpoint_path, map_location='cpu')
-                global_model.load_state_dict(ckpt, strict=False)  # Use strict=False to handle partial loading
+                global_model.load_state_dict(ckpt)  # Match test.py exactly - no strict=False
                 del ckpt  # Free CPU memory from checkpoint
                 
                 if torch.cuda.is_available():
