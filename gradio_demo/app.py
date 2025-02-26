@@ -39,7 +39,7 @@ lang_model_path = os.path.join(root_dir, "Quick_demo", "Language_files")
 
 def load_model_and_tokenizer():
     """Load the RadFM model and tokenizer."""
-    global global_model, global_tokenizer, global_image_padding_tokens
+    global global_model, global_tokenizer, global_image_padding_tokens, device
     
     try:
         print("Loading tokenizer...")
@@ -47,43 +47,40 @@ def load_model_and_tokenizer():
         print("Tokenizer loaded successfully!")
         
         print("Loading model...")
-        # Clear CUDA cache before loading model
         if torch.cuda.is_available():
-            torch.cuda.empty_cache()
             print(f"CUDA available. Using GPU: {torch.cuda.get_device_name()}")
+            torch.cuda.empty_cache()
             print(f"Initial CUDA memory allocated: {torch.cuda.memory_allocated()/1e9:.2f} GB")
         
+        # Initialize model
         global_model = MultiLLaMAForCausalLM(lang_model_path=lang_model_path)
         
         if os.path.exists(checkpoint_path):
-            print("Loading checkpoint...")
-            # Load checkpoint to CPU first
+            print("Loading checkpoint to CPU first...")
             ckpt = torch.load(checkpoint_path, map_location='cpu')
+            global_model.load_state_dict(ckpt)
+            del ckpt  # Free CPU memory from checkpoint
             
-            # Move model to device before loading state dict
             if torch.cuda.is_available():
                 try:
-                    global_model = global_model.cuda()
-                    # Convert checkpoint tensors to CUDA
-                    ckpt = {k: v.cuda() if isinstance(v, torch.Tensor) else v for k, v in ckpt.items()}
+                    print("Moving model to GPU...")
+                    global_model = global_model.to('cuda')
+                    device = torch.device('cuda')
+                    torch.cuda.empty_cache()
+                    print(f"CUDA memory after model loading: {torch.cuda.memory_allocated()/1e9:.2f} GB")
                 except RuntimeError as e:
                     print(f"CUDA error: {e}")
                     print("Falling back to CPU due to CUDA memory constraints")
                     device = torch.device('cpu')
-                    global_model = global_model.cpu()
             
-            global_model.load_state_dict(ckpt)
-            del ckpt  # Free memory from checkpoint
-            torch.cuda.empty_cache()  # Clear any unused memory
-            
-            global_model.eval()  # Set to evaluation mode
+            global_model.eval()
             print(f"Model loaded successfully on {device}!")
             
+            # Print memory usage
             if torch.cuda.is_available():
                 print(f"Final CUDA memory allocated: {torch.cuda.memory_allocated()/1e9:.2f} GB")
                 print(f"Final CUDA memory cached: {torch.cuda.memory_reserved()/1e9:.2f} GB")
             
-            # Print CPU memory usage
             import psutil
             process = psutil.Process()
             print(f"CPU RAM usage: {process.memory_info().rss/1e9:.2f} GB")
@@ -228,7 +225,6 @@ def run_inference(image_array, prompt):
     global global_model, global_tokenizer, global_image_padding_tokens
     
     try:
-        # Clear CUDA cache before inference
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         
@@ -257,16 +253,15 @@ def run_inference(image_array, prompt):
             # Tokenize text and move to device
             lang_x = global_tokenizer(
                 text, max_length=2048, truncation=True, return_tensors="pt"
-            )['input_ids'].to(device)
+            )['input_ids'].to('cuda' if torch.cuda.is_available() else 'cpu')
             
             # Move vision_x to device
-            vision_x = vision_x.to(device)
+            vision_x = vision_x.to('cuda' if torch.cuda.is_available() else 'cpu')
             
             # Generate response
             generation = global_model.generate(lang_x, vision_x)
             response = global_tokenizer.batch_decode(generation, skip_special_tokens=True)[0]
             
-            # Clear cache after inference
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             
