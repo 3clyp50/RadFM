@@ -41,23 +41,64 @@ def load_model_and_tokenizer():
     """Load the RadFM model and tokenizer."""
     global global_model, global_tokenizer, global_image_padding_tokens
     
-    print("Loading tokenizer...")
-    global_tokenizer, global_image_padding_tokens = get_tokenizer(lang_model_path)
-    print("Tokenizer loaded successfully!")
-    
-    print("Loading model...")
-    global_model = MultiLLaMAForCausalLM(lang_model_path=lang_model_path)
-    
-    if os.path.exists(checkpoint_path):
-        ckpt = torch.load(checkpoint_path, map_location='cpu')
-        global_model.load_state_dict(ckpt)
-        global_model = global_model.to(device)
-        global_model.eval()
-        print("Model loaded successfully!")
-    else:
-        print(f"Warning: Model checkpoint not found at {checkpoint_path}")
-        print("Please download the model checkpoint from https://huggingface.co/chaoyi-wu/RadFM")
-        print("and place it in the Quick_demo directory.")
+    try:
+        print("Loading tokenizer...")
+        global_tokenizer, global_image_padding_tokens = get_tokenizer(lang_model_path)
+        print("Tokenizer loaded successfully!")
+        
+        print("Loading model...")
+        # Clear CUDA cache before loading model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            print(f"CUDA available. Using GPU: {torch.cuda.get_device_name()}")
+            print(f"Initial CUDA memory allocated: {torch.cuda.memory_allocated()/1e9:.2f} GB")
+        
+        global_model = MultiLLaMAForCausalLM(lang_model_path=lang_model_path)
+        
+        if os.path.exists(checkpoint_path):
+            print("Loading checkpoint...")
+            # Load checkpoint to CPU first
+            ckpt = torch.load(checkpoint_path, map_location='cpu')
+            
+            # Move model to device before loading state dict
+            if torch.cuda.is_available():
+                try:
+                    global_model = global_model.cuda()
+                    # Convert checkpoint tensors to CUDA
+                    ckpt = {k: v.cuda() if isinstance(v, torch.Tensor) else v for k, v in ckpt.items()}
+                except RuntimeError as e:
+                    print(f"CUDA error: {e}")
+                    print("Falling back to CPU due to CUDA memory constraints")
+                    device = torch.device('cpu')
+                    global_model = global_model.cpu()
+            
+            global_model.load_state_dict(ckpt)
+            del ckpt  # Free memory from checkpoint
+            torch.cuda.empty_cache()  # Clear any unused memory
+            
+            global_model.eval()  # Set to evaluation mode
+            print(f"Model loaded successfully on {device}!")
+            
+            if torch.cuda.is_available():
+                print(f"Final CUDA memory allocated: {torch.cuda.memory_allocated()/1e9:.2f} GB")
+                print(f"Final CUDA memory cached: {torch.cuda.memory_reserved()/1e9:.2f} GB")
+            
+            # Print CPU memory usage
+            import psutil
+            process = psutil.Process()
+            print(f"CPU RAM usage: {process.memory_info().rss/1e9:.2f} GB")
+            
+        else:
+            print(f"Warning: Model checkpoint not found at {checkpoint_path}")
+            print("Please download the model checkpoint from https://huggingface.co/chaoyi-wu/RadFM")
+            print("and place it in the Quick_demo directory.")
+            return "Model checkpoint not found!"
+        
+    except Exception as e:
+        print(f"Error during model loading: {e}")
+        import traceback
+        traceback.print_exc()
+        return f"Error loading model: {str(e)}"
     
     return "Model and tokenizer loaded successfully!"
 
@@ -186,44 +227,63 @@ def run_inference(image_array, prompt):
     """Run RadFM model inference on the given image and prompt."""
     global global_model, global_tokenizer, global_image_padding_tokens
     
-    # Preprocess the image
-    image_tensor = preprocess_for_model(image_array)
-    
-    # Combine text and images for model input
-    question = [prompt]
-    image_info = [
-        {
-            'img_tensor': image_tensor,
-            'position': 0,  # Position in the text
-        }
-    ]
-    
-    # Prepare model input
-    with torch.no_grad():
-        # Prepare inputs
-        text, vision_x = "", None
+    try:
+        # Clear CUDA cache before inference
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         
-        # Handle direct tensor input
-        text = prompt
-        vision_tensors = [img_info['img_tensor'] for img_info in image_info]
-        vision_x = torch.cat(vision_tensors, dim=1).unsqueeze(0)
+        # Preprocess the image
+        image_tensor = preprocess_for_model(image_array)
         
-        # Add image placeholder to text
-        text = "<image>" + global_image_padding_tokens[0] + "</image>" + text
+        # Combine text and images for model input
+        question = [prompt]
+        image_info = [
+            {
+                'img_tensor': image_tensor,
+                'position': 0,  # Position in the text
+            }
+        ]
         
-        # Tokenize text
-        lang_x = global_tokenizer(
-            text, max_length=2048, truncation=True, return_tensors="pt"
-        )['input_ids'].to(device)
-        
-        # Move vision_x to device
-        vision_x = vision_x.to(device)
-        
-        # Generate response
-        generation = global_model.generate(lang_x, vision_x)
-        response = global_tokenizer.batch_decode(generation, skip_special_tokens=True)[0]
-        
-    return response
+        # Prepare model input
+        with torch.no_grad():
+            # Handle direct tensor input
+            text = prompt
+            vision_tensors = [img_info['img_tensor'] for img_info in image_info]
+            vision_x = torch.cat(vision_tensors, dim=1).unsqueeze(0)
+            
+            # Add image placeholder to text
+            text = "<image>" + global_image_padding_tokens[0] + "</image>" + text
+            
+            # Tokenize text and move to device
+            lang_x = global_tokenizer(
+                text, max_length=2048, truncation=True, return_tensors="pt"
+            )['input_ids'].to(device)
+            
+            # Move vision_x to device
+            vision_x = vision_x.to(device)
+            
+            # Generate response
+            generation = global_model.generate(lang_x, vision_x)
+            response = global_tokenizer.batch_decode(generation, skip_special_tokens=True)[0]
+            
+            # Clear cache after inference
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
+            return response
+            
+    except RuntimeError as e:
+        if "out of memory" in str(e):
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            print(f"CUDA out of memory error: {e}")
+            return "Error: GPU out of memory. Please try again with a smaller input."
+        else:
+            print(f"Runtime error during inference: {e}")
+            return f"Error during inference: {str(e)}"
+    except Exception as e:
+        print(f"Error during inference: {e}")
+        return f"Error during inference: {str(e)}"
 
 def create_multiplanar_view(volume_data, slice_idx=None):
     """Create multiplanar views (axial, coronal, sagittal) from volume data."""
