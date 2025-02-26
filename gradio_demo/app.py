@@ -34,9 +34,10 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 global_model = None
 global_tokenizer = None
 global_image_padding_tokens = None
-# Separate paths for language model files and checkpoint
-checkpoint_path = os.path.join(root_dir, "pytorch_model.bin")  # Main checkpoint in root
-lang_model_path = os.path.join(root_dir, "Quick_demo", "Language_files")  # Language files in Quick_demo
+# Paths relative to Quick_demo directory
+quick_demo_dir = os.path.join(root_dir, "Quick_demo")
+checkpoint_path = os.path.join(quick_demo_dir, "pytorch_model.bin")  # Checkpoint in Quick_demo
+lang_model_path = os.path.join(quick_demo_dir, "Language_files")  # Language files in Quick_demo
 
 def load_model_and_tokenizer():
     """Load the RadFM model and tokenizer."""
@@ -44,6 +45,7 @@ def load_model_and_tokenizer():
     
     try:
         print("Loading tokenizer...")
+        print(f"Using language model files from: {lang_model_path}")
         global_tokenizer, global_image_padding_tokens = get_tokenizer(lang_model_path)
         print("Tokenizer loaded successfully!")
         
@@ -54,7 +56,7 @@ def load_model_and_tokenizer():
             print(f"Initial CUDA memory allocated: {torch.cuda.memory_allocated()/1e9:.2f} GB")
         
         # Initialize model with language model path
-        print(f"Initializing model with language files from: {lang_model_path}")
+        print(f"Initializing model with config from: {lang_model_path}")
         global_model = MultiLLaMAForCausalLM(lang_model_path=lang_model_path)
         
         # Load the RadFM checkpoint
@@ -91,7 +93,7 @@ def load_model_and_tokenizer():
         else:
             print(f"Warning: Model checkpoint not found at {checkpoint_path}")
             print("Please download the model checkpoint from https://huggingface.co/chaoyi-wu/RadFM")
-            print("and place it in the root RadFM directory (not in Quick_demo).")
+            print("and place it in the Quick_demo directory as pytorch_model.bin")
             return "Model checkpoint not found!"
         
     except Exception as e:
